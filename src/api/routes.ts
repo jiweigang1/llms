@@ -91,6 +91,7 @@ async function processRequestTransformers(
   }
 
   // 执行transformer的transformRequestOut方法
+  // 只有注册了 endpoint 的 transform 才可以执行
   if (!bypass && typeof transformer.transformRequestOut === "function") {
     const transformOut = await transformer.transformRequestOut(requestBody);
     if (transformOut.body) {
@@ -161,7 +162,7 @@ function shouldBypassTransformers(
 }
 
 /**
- * 发送请求到LLM提供者
+ * 发送请求到LLM提供者，进行真实的模型调用
  * 处理认证、构建请求配置、发送请求并处理错误
  */
 async function sendRequestToProvider(
@@ -240,6 +241,7 @@ async function processResponseTransformers(
   let finalResponse = response;
 
   // 执行provider级别的响应转换器
+  // transformResponseIn 处理是外部模型厂商直接返回的请求
   if (!bypass && provider.transformer?.use?.length) {
     for (const providerTransformer of Array.from(
       provider.transformer.use
@@ -273,7 +275,8 @@ async function processResponseTransformers(
     }
   }
 
-  // 执行transformer的transformResponseIn方法
+  // 执行transformer的transformResponseIn方法  只有具有 endpoint 的 transformer 才会执行 transformResponseIn
+  // 处理已经被 transformResponseOut 处理过的请求
   if (!bypass && transformer.transformResponseIn) {
     finalResponse = await transformer.transformResponseIn(finalResponse);
   }
@@ -318,12 +321,15 @@ export const registerApiRoutes: FastifyPluginAsync = async (
 
   const transformersWithEndpoint =
     fastify._server!.transformerService.getTransformersWithEndpoint();
-
+  
+  //这里会进行模型调用，转换
   for (const { transformer } of transformersWithEndpoint) {
+    //如果有 endPoint 应该就是模型的地址
     if (transformer.endPoint) {
       fastify.post(
         transformer.endPoint,
         async (req: FastifyRequest, reply: FastifyReply) => {
+          //这里的 transformer 是单例模式，不是每次请求创建一个
           return handleTransformerEndpoint(req, reply, fastify, transformer);
         }
       );
